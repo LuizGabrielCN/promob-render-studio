@@ -49,7 +49,6 @@ jobs:
           choco install innosetup --version $env:INNO_SETUP_VERSION -y --no-progress --allow-downgrade
           $iscc = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
           if (-not $iscc) { throw "ISCC.exe não encontrado" }
-          & $iscc /? | Select-Object -First 1
           "ISCC=$iscc" >> $env:GITHUB_ENV
       - name: Montar pacote e compilar instalador
         shell: pwsh
