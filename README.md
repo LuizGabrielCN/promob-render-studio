@@ -54,6 +54,7 @@ Capturas geradas pelo teste visual automatizado ([`scripts/ui_walkthrough.py`](s
 | ![Tela inicial com o botão Experimentar com uma amostra](docs/screenshots/01-tela-inicial.png) **1.** Tela inicial | ![Amostra processada no modo Clássico com comparação antes e depois](docs/screenshots/03-comparacao-divisor.png) **2.** Amostra processada em CPU, com o divisor antes/depois e o botão **Baixar PNG** |
 | ![Cartão para ativar a ampliação 4× com o tamanho do download](docs/screenshots/05-ativar-4x.png) **3.** A ampliação 4× mostra o tamanho antes de baixar | ![Falha de download com o botão Tentar novamente](docs/screenshots/07-falha-download.png) **4.** Sem conexão, o download falha com uma explicação e **Tentar novamente** |
 | ![Resultado ampliado 4× com o modelo baixado](docs/screenshots/09-resultado-4x.png) **5.** Depois da nova tentativa, o resultado sai em 4× (2892 × 3600) | ![Realismo IA indisponível sem GPU NVIDIA](docs/screenshots/06b-realismo-sem-gpu.png) **6.** Sem GPU NVIDIA, o Realismo IA explica o motivo e o Clássico continua disponível |
+| ![Cartão para ativar o Realismo IA com o tamanho do download](docs/screenshots/06-realismo-ia.png) **7.** Com GPU NVIDIA, o Realismo IA mostra o download estimado antes de começar | ![Amostra processada pelo Realismo IA numa RTX 2060](docs/screenshots/10-realismo-ia-gpu.png) **8.** Amostra processada pelo Realismo IA numa RTX 2060 de 6 GB, depois da ativação pelo app |
 
 ## Instalação pelo código-fonte
 

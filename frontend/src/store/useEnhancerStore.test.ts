@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { useEnhancerStore, DEFAULT_PARAMETERS, PRESETS } from './useEnhancerStore';
+import { useEnhancerStore, DEFAULT_PARAMETERS, PRESETS, SAMPLE_PARAMETERS } from './useEnhancerStore';
 import * as apiClient from '@/api/client';
 import * as imageLib from '@/lib/image';
 
@@ -542,6 +542,16 @@ describe('primeira experiência e recursos opcionais', () => {
     expect(state.job.status).toBe('completed');
     expect(state.enhanced4kUrl).toBe('/api/download/job-amostra');
     expect(state.original?.objectUrl).toBe('blob:amostra');
+  });
+
+  it('a primeira leitura dos recursos não apaga um resultado já pronto', async () => {
+    useEnhancerStore.setState({
+      parameters: { ...useEnhancerStore.getState().parameters, ...SAMPLE_PARAMETERS },
+      enhanced4kUrl: '/api/download/job-pronto',
+    });
+    vi.spyOn(apiClient, 'fetchFeatures').mockResolvedValue(featuresResponse(false, false));
+    await useEnhancerStore.getState().fetchFeatures();
+    expect(useEnhancerStore.getState().enhanced4kUrl).toBe('/api/download/job-pronto');
   });
 
   it('mostra erro amigável se a amostra não carregar', async () => {

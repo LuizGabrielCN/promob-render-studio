@@ -152,14 +152,16 @@ function adaptToFeatures(
   features: FeaturesResponse | null
 ): { parameters: EnhancementParameters; activePreset: PresetKey } {
   if (!features) return { parameters, activePreset };
-  let next = { ...parameters };
+  // Devolve o mesmo objeto quando nada muda: o store usa a identidade para saber se precisa
+  // descartar um resultado já pronto (ex.: a amostra terminou antes desta leitura chegar).
+  let next = parameters;
   let preset = activePreset;
   if (!features.features.realismo_ia.ready && next.render_mode === 'generative') {
     next = { ...next, ...PRESETS.natural.params, render_mode: 'classic' };
     preset = 'natural';
   }
   if (!features.features.upscale_4x.ready && next.upscale_factor > 1) {
-    next.upscale_factor = 1;
+    next = { ...next, upscale_factor: 1 };
   }
   return { parameters: next, activePreset: preset };
 }
