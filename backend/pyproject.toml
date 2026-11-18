@@ -12,6 +12,8 @@ authors = [
     { name = "ArchRender Studio Team" }
 ]
 dependencies = [
+    # Núcleo: modo Clássico, prévia, ampliação 4× (ONNX) e download de modelos.
+    # O instalador do Windows embute somente estas dependências.
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "pydantic>=2.7.0",
@@ -20,19 +22,9 @@ dependencies = [
     "opencv-python>=4.8.0",
     "onnxruntime-directml>=1.18.0; sys_platform == 'win32'",
     "onnxruntime>=1.18.0; sys_platform != 'win32'",
-    "scikit-image>=0.22.0",
-    "scipy>=1.12.0",
     "python-multipart>=0.0.9",
     "psutil>=5.9.0",
-    "torch>=2.6.0",
-    "torchvision>=0.21.0",
-    "diffusers>=0.30.0",
-    "transformers>=0.44.0",
-    "accelerate>=0.33.0",
-    "safetensors>=0.4.4",
     "huggingface-hub>=0.24.0",
-    "einops>=0.8.0",
-    "rapidocr-onnxruntime>=1.4.4",
 ]
 
 [project.optional-dependencies]
@@ -46,6 +38,20 @@ test = [
 ]
 
 [dependency-groups]
+# Realismo IA (PyTorch CUDA, diffusers etc.). Instalado por padrão no `uv sync`
+# e sob demanda pelo aplicativo instalado no Windows.
+ai = [
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
+    "diffusers>=0.30.0",
+    "transformers>=0.44.0",
+    "accelerate>=0.33.0",
+    "safetensors>=0.4.4",
+    "einops>=0.8.0",
+    "rapidocr-onnxruntime>=1.4.4",
+    "scikit-image>=0.22.0",
+    "scipy>=1.12.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -78,6 +84,7 @@ url = "https://download.pytorch.org/whl/cu124"
 explicit = true
 
 [tool.uv]
+default-groups = ["dev", "ai"]
 override-dependencies = [
     "onnxruntime>=1.18.0; sys_platform != 'win32'",
 ]

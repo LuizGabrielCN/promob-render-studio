@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { useEnhancerStore } from '@/store/useEnhancerStore';
 import { Button } from '@/components/ui/button';
+import { readImageSource } from '@/lib/image';
 import {
   UploadCloud,
   FileImage,
@@ -11,10 +12,9 @@ import {
 } from 'lucide-react';
 
 export const Dropzone: React.FC = () => {
-  const { setOriginalImage } = useEnhancerStore();
+  const { setOriginalImage, trySample, sampleLoading, sampleError } = useEnhancerStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [isLoadingSample, setIsLoadingSample] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const processFile = (file: File) => {
@@ -30,23 +30,9 @@ export const Dropzone: React.FC = () => {
       return;
     }
 
-    const objectUrl = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      setOriginalImage({
-        file,
-        objectUrl,
-        width: img.naturalWidth,
-        height: img.naturalHeight,
-        name: file.name,
-        size: file.size,
-      });
-    };
-    img.onerror = () => {
-      setErrorMessage('Não foi possível ler as dimensões da imagem.');
-      URL.revokeObjectURL(objectUrl);
-    };
-    img.src = objectUrl;
+    readImageSource(file)
+      .then(setOriginalImage)
+      .catch((err: Error) => setErrorMessage(err.message));
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -74,26 +60,6 @@ export const Dropzone: React.FC = () => {
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       processFile(e.target.files[0]);
-    }
-  };
-
-  const handleLoadSample = async () => {
-    try {
-      setIsLoadingSample(true);
-      setErrorMessage(null);
-      const sampleUrl = '/samples/promob_sample.jpg';
-      const response = await fetch(sampleUrl);
-      if (!response.ok) {
-        throw new Error('Amostra Promob não encontrada em /samples/promob_sample.jpg');
-      }
-      const blob = await response.blob();
-      const file = new File([blob], 'promob_cozinha_original.jpg', { type: 'image/jpeg' });
-      processFile(file);
-    } catch (err: any) {
-      console.error('Erro ao carregar amostra:', err);
-      setErrorMessage(err.message || 'Erro ao carregar render de amostra.');
-    } finally {
-      setIsLoadingSample(false);
     }
   };
 
@@ -127,6 +93,7 @@ export const Dropzone: React.FC = () => {
         </h2>
         <p className="text-xs text-zinc-400 mb-6 max-w-md">
           Suporte direto para imagens brutas geradas pelo Promob Studio ou Real Scene (JPEG, PNG, WEBP).
+          A amostra roda no modo Clássico, em CPU e na resolução original, sem baixar modelos de IA.
         </p>
 
         <div className="flex items-center gap-3 mb-6">
@@ -148,13 +115,13 @@ export const Dropzone: React.FC = () => {
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              handleLoadSample();
+              trySample();
             }}
-            disabled={isLoadingSample}
+            disabled={sampleLoading}
             className="text-xs bg-zinc-100 text-zinc-900 hover:bg-zinc-200 font-semibold"
           >
             <Sparkles className="h-3.5 w-3.5 mr-1.5 text-amber-600" />
-            {isLoadingSample ? 'Carregando Amostra...' : 'Carregar Amostra Promob'}
+            {sampleLoading ? 'Carregando amostra...' : 'Experimentar com uma amostra'}
           </Button>
         </div>
 
@@ -162,22 +129,22 @@ export const Dropzone: React.FC = () => {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 w-full max-w-md pt-4 border-t border-zinc-800/80 text-[11px] text-zinc-400">
           <div className="flex items-center gap-1.5 justify-center">
             <Zap className="h-3.5 w-3.5 text-amber-400" />
-            <span>Super-Resolução 4K</span>
+            <span>Ampliação 4× opcional</span>
           </div>
           <div className="flex items-center gap-1.5 justify-center">
             <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
-            <span>Zero Alucinação</span>
+            <span>Processamento local</span>
           </div>
           <div className="flex items-center gap-1.5 justify-center col-span-2 sm:col-span-1">
             <ArrowRight className="h-3.5 w-3.5 text-zinc-400" />
-            <span>Fidelidade 100%</span>
+            <span>Geometria preservada</span>
           </div>
         </div>
       </div>
 
-      {errorMessage && (
+      {(errorMessage || sampleError) && (
         <div className="mt-4 p-3 rounded-md bg-red-950/60 border border-red-800 text-red-300 text-xs flex items-center gap-2">
-          <span>{errorMessage}</span>
+          <span>{errorMessage || sampleError}</span>
         </div>
       )}
     </div>

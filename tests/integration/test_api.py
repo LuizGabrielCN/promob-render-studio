@@ -3,6 +3,7 @@ Integration tests for Promob Render Enhancer FastAPI REST API.
 Verifies endpoints: /health, /preview, /enhance, /jobs/{id}, /download/{id}, /presets, /capabilities, /
 """
 import io
+from pathlib import Path
 import time
 import cv2
 import numpy as np
@@ -501,3 +502,64 @@ def test_api_preview_does_not_block_event_loop_for_health(api_client, sample_jpe
             assert preview_resp.status_code == 200
 
     asyncio.run(_run_concurrent())
+
+
+# ============================================================================
+# Primeira experiência do instalador Windows: amostra no modo Clássico, 1×, CPU
+# ============================================================================
+
+SAMPLE_PATH = Path(__file__).resolve().parents[2] / "frontend" / "public" / "samples" / "promob_sample.jpg"
+
+
+def test_health_identifies_the_app(api_client):
+    data = api_client.get("/api/health").json()
+    assert data["app"] == "promob-render-studio"
+
+
+def test_sample_classic_original_resolution_roundtrip(api_client):
+    """O botão 'Experimentar com uma amostra' usa a rota real: classic + upscale_factor=1, sem pesos de IA."""
+    sample = SAMPLE_PATH.read_bytes()
+    src = cv2.imdecode(np.frombuffer(sample, np.uint8), cv2.IMREAD_COLOR)
+    response = api_client.post(
+        "/api/enhance",
+        files={"file": ("promob_sample.jpg", sample, "image/jpeg")},
+        data={"render_mode": "classic", "upscale_factor": "1"},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    deadline = time.time() + 120
+    job = {}
+    while time.time() < deadline:
+        job = api_client.get(f"/api/jobs/{job_id}").json()
+        if job["status"] in ("completed", "failed"):
+            break
+        time.sleep(0.2)
+    assert job["status"] == "completed", job
+    assert (job["output_width"], job["output_height"]) == (src.shape[1], src.shape[0])
+
+    png = api_client.get(f"/api/download/{job_id}")
+    assert png.status_code == 200
+    assert png.headers["content-type"] == "image/png"
+    assert png.content[:8] == b"\x89PNG\r\n\x1a\n"
+    out = cv2.imdecode(np.frombuffer(png.content, np.uint8), cv2.IMREAD_COLOR)
+    assert out.shape == src.shape
+
+
+def test_features_status_shape(api_client):
+    data = api_client.get("/api/features").json()
+    assert set(data["features"]) == {"upscale_4x", "realismo_ia"}
+    for feature in data["features"].values():
+        assert {"ready", "available", "download_bytes", "task"} <= set(feature)
+
+
+def test_feature_activation_requires_json(api_client):
+    assert api_client.post("/api/features/upscale_4x/activate", data={"x": "1"}).status_code == 415
+
+
+def test_unknown_feature_is_404(api_client):
+    assert api_client.post("/api/features/nada/activate", json={}).status_code == 404
+
+
+def test_shutdown_is_hidden_without_launcher_token(api_client):
+    assert api_client.post("/api/app/shutdown", json={}).status_code == 404

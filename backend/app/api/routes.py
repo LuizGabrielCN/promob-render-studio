@@ -4,7 +4,9 @@ Provides endpoints for hardware monitoring, real-time preview, asynchronous 4K e
 job lifecycle polling, and image asset downloading.
 """
 import io
+import os
 import re
+import secrets
 import uuid
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -30,11 +32,14 @@ from starlette.concurrency import run_in_threadpool
 from app.core.interfaces import BaseEnhancer, EnhancementConfig
 from app.core.hardware import HardwareGuardrails
 from app.core.storage import StorageManager, get_default_storage
+from app.core.features import FEATURES, get_feature_manager
 from app.pipeline.enhancer import ClassicEnhancer
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+APP_ID = "promob-render-studio"
 
 # Global background thread pool for heavy processing
 _executor: Optional[ThreadPoolExecutor] = None
@@ -264,6 +269,8 @@ async def health_check() -> Dict[str, Any]:
 
     return {
         "status": "ok",
+        "app": APP_ID,
+        "instance": os.environ.get("PROMOB_INSTANCE_ID"),
         "gpu": device_name,
         "vram_free_mb": max(0.0, float(free_mb)),
         "cuda_available": vram_status.get("cuda_available", False),
@@ -612,3 +619,50 @@ def get_engine_capabilities(
 ) -> Dict[str, Any]:
     """Returns engine capabilities, photometric pipeline stages, and hardware metadata."""
     return enhancer.get_capabilities()
+
+
+# ============================================================================
+# Route 8: On-demand features (4K model, Realismo IA) (GET/POST /features)
+# ============================================================================
+def _require_json(request: Request) -> None:
+    """Exige JSON para ações com efeito, o que impede formulários de outros sites (CORS preflight)."""
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type != "application/json":
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Envie a solicitação como application/json.",
+        )
+
+
+@router.get("/features", summary="On-demand feature status (4K model, Realismo IA)")
+def get_features() -> Dict[str, Any]:
+    """Estado de cada recurso opcional: pronto, disponível, tamanho estimado e progresso do download."""
+    return get_feature_manager().status()
+
+
+@router.post("/features/{feature}/activate", summary="Download and activate an optional feature")
+def activate_feature(feature: str, request: Request) -> Dict[str, Any]:
+    """Inicia (ou tenta de novo) o download de um recurso em segundo plano. Acompanhe por GET /features."""
+    _require_json(request)
+    if feature not in FEATURES:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Recurso desconhecido: {feature}")
+    try:
+        task = get_feature_manager().start(feature)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return {"feature": feature, "task": task}
+
+
+# ============================================================================
+# Route 9: Local shutdown used by the Windows launcher (POST /app/shutdown)
+# ============================================================================
+@router.post("/app/shutdown", include_in_schema=False)
+def shutdown_app(request: Request) -> Dict[str, Any]:
+    """Encerra o servidor iniciado pelo atalho do Windows. Exige o token gravado pelo launcher."""
+    expected = os.environ.get("PROMOB_SHUTDOWN_TOKEN")
+    callback = getattr(request.app.state, "request_shutdown", None)
+    provided = request.headers.get("x-promob-token", "")
+    if not expected or callback is None or not secrets.compare_digest(provided, expected):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    callback()
+    return {"status": "stopping"}

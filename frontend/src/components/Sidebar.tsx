@@ -3,6 +3,7 @@ import { useEnhancerStore, PRESETS, DEFAULT_PARAMETERS } from '@/store/useEnhanc
 import { PresetKey, RenderMode, SceneProfile } from '@/types';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
+import { FeatureCard } from '@/components/FeatureCard';
 import {
   SunMedium,
   Layers,
@@ -22,6 +23,7 @@ import {
   Trees,
   CloudDownload,
   AlertCircle,
+  Maximize2,
 } from 'lucide-react';
 
 const PRESET_SUBTITLES: Record<Exclude<PresetKey, 'personalizado'>, string> = {
@@ -38,14 +40,14 @@ const ENGINE_MODE_OPTIONS: ReadonlyArray<{
   subtitle: string;
 }> = [
   {
-    value: 'generative',
-    label: '✨ Realismo IA (Estilo ChatGPT)',
-    subtitle: 'ControlNet local + PBR + Real-ESRGAN 4K',
+    value: 'classic',
+    label: '⚡ Clássico (funciona em CPU)',
+    subtitle: 'Ajustes fotométricos determinísticos, sem baixar modelos',
   },
   {
-    value: 'classic',
-    label: '⚡ Clássico Rápido (Filtros)',
-    subtitle: 'PBR fotométrico instantâneo + Real-ESRGAN 4K',
+    value: 'generative',
+    label: '✨ Realismo IA',
+    subtitle: 'ControlNet local; requer GPU NVIDIA e download dos modelos',
   },
 ];
 
@@ -140,7 +142,43 @@ export const Sidebar: React.FC = () => {
     job,
     startEnhancement,
     enhanced4kUrl,
+    features,
+    fetchFeatures,
   } = useEnhancerStore();
+
+  // Mostra o cartão de ativação quando a pessoa escolhe um recurso que ainda não foi baixado.
+  const [requested, setRequested] = useState<{ realismo: boolean; upscale: boolean }>({
+    realismo: false,
+    upscale: false,
+  });
+  const realismoReady = features?.features.realismo_ia.ready ?? false;
+  const upscaleReady = features?.features.upscale_4x.ready ?? false;
+  const realismoRunning = features?.features.realismo_ia.task.state === 'running';
+  const upscaleRunning = features?.features.upscale_4x.task.state === 'running';
+
+  React.useEffect(() => {
+    if (!features) fetchFeatures();
+  }, [features, fetchFeatures]);
+
+  const chooseEngine = (mode: RenderMode) => {
+    if (mode === 'generative' && features && !realismoReady) {
+      setRequested((r) => ({ ...r, realismo: true }));
+      return;
+    }
+    updateParameter('render_mode', mode);
+  };
+
+  const chooseScale = (factor: 1 | 4) => {
+    if (factor === 4 && features && !upscaleReady) {
+      setRequested((r) => ({ ...r, upscale: true }));
+      return;
+    }
+    updateParameter('upscale_factor', factor);
+  };
+
+  const scale = parameters.upscale_factor;
+  const outWidth = original ? original.width * scale : 0;
+  const outHeight = original ? original.height * scale : 0;
 
   const [expandedSections, setExpandedSections] = useState({
     generative: true,
@@ -163,7 +201,7 @@ export const Sidebar: React.FC = () => {
     const a = document.createElement('a');
     a.href = enhanced4kUrl;
     const originalName = original?.name?.replace(/\.[^/.]+$/, '') || 'render_promob';
-    a.download = `${originalName}_4K_Studio.png`;
+    a.download = `${originalName}_${scale > 1 ? `${scale}x` : 'aprimorado'}.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -203,7 +241,15 @@ export const Sidebar: React.FC = () => {
               <button
                 key={key}
                 type="button"
-                onClick={() => applyPreset(key)}
+                onClick={() => {
+                  if (preset.params.render_mode === 'generative' && features && !realismoReady) {
+                    // Preset de IA sem modelos: mostra a ativação em vez de selecionar um modo indisponível.
+                    setRequested((r) => ({ ...r, realismo: true }));
+                    setExpandedSections((prev) => ({ ...prev, generative: true }));
+                    return;
+                  }
+                  applyPreset(key);
+                }}
                 className={`text-left p-2 rounded-md border transition-all text-xs ${
                   isFeatured ? 'col-span-2' : ''
                 } ${
@@ -233,6 +279,50 @@ export const Sidebar: React.FC = () => {
 
       {/* Scrollable Sliders Area */}
       <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
+        {/* Resolução de saída: original (1×) ou ampliação 4× (opcional, baixa o modelo na 1ª vez) */}
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/20 p-2.5 space-y-2">
+          <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
+            <Maximize2 className="h-3.5 w-3.5 text-emerald-400" />
+            <span>Resolução de saída</span>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {([1, 4] as const).map((factor) => {
+              const isSelected = scale === factor;
+              const needsActivation = factor === 4 && features && !upscaleReady;
+              return (
+                <button
+                  key={factor}
+                  type="button"
+                  onClick={() => chooseScale(factor)}
+                  className={`text-left px-2 py-1.5 rounded-md border text-[11px] font-medium transition-all ${
+                    isSelected
+                      ? 'border-zinc-500 bg-zinc-800 text-zinc-100 shadow-sm'
+                      : 'border-zinc-800/80 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span>{factor === 1 ? 'Original (1×)' : 'Ampliar 4×'}</span>
+                    {needsActivation && (
+                      <span className="text-[9px] font-mono uppercase px-1 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                        {upscaleRunning ? 'baixando' : 'ativar'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[9px] text-zinc-500 mt-0.5">
+                    {factor === 1 ? 'Mais rápido, roda em CPU' : 'Real-ESRGAN, modelo de 64 MB'}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {original && (
+            <p className="text-[10px] text-zinc-500 font-mono">
+              {original.width} × {original.height} → <span className="text-emerald-400">{outWidth} × {outHeight}</span>
+            </p>
+          )}
+          {features && !upscaleReady && (requested.upscale || upscaleRunning) && <FeatureCard feature="upscale_4x" />}
+        </div>
+
         {/* Section 0: Realismo IA (ControlNet Local) */}
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/20 overflow-hidden">
           <button
@@ -242,7 +332,7 @@ export const Sidebar: React.FC = () => {
           >
             <div className="flex items-center gap-2">
               <WandSparkles className="h-3.5 w-3.5 text-amber-400" />
-              <span>Realismo IA (ControlNet Local)</span>
+              <span>Motor de renderização</span>
             </div>
             {expandedSections.generative ? (
               <ChevronUp className="h-3.5 w-3.5 text-zinc-500" />
@@ -265,7 +355,7 @@ export const Sidebar: React.FC = () => {
                       <button
                         key={option.value}
                         type="button"
-                        onClick={() => updateParameter('render_mode', option.value)}
+                        onClick={() => chooseEngine(option.value)}
                         className={`text-left px-2.5 py-2 rounded-md border transition-all ${
                           isSelected
                             ? option.value === 'generative'
@@ -274,8 +364,17 @@ export const Sidebar: React.FC = () => {
                             : 'border-zinc-800/80 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
                         }`}
                       >
-                        <div className="text-[11px] font-medium leading-tight">
-                          {option.label}
+                        <div className="text-[11px] font-medium leading-tight flex items-center justify-between gap-1">
+                          <span>{option.label}</span>
+                          {option.value === 'generative' && features && !realismoReady && (
+                            <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                              {realismoRunning
+                                ? 'baixando'
+                                : features.features.realismo_ia.available
+                                  ? 'ativar'
+                                  : 'indisponível'}
+                            </span>
+                          )}
                         </div>
                         <div className="text-[9px] text-zinc-500 mt-0.5">
                           {option.subtitle}
@@ -285,6 +384,10 @@ export const Sidebar: React.FC = () => {
                   })}
                 </div>
               </div>
+
+              {features && !realismoReady && (requested.realismo || realismoRunning) && (
+                <FeatureCard feature="realismo_ia" />
+              )}
 
               {/* Scene Profile Selector */}
               <div className={`space-y-1.5 ${isClassicMode ? 'opacity-45' : ''}`}>
@@ -535,7 +638,9 @@ export const Sidebar: React.FC = () => {
             <div className="p-3 pt-1 border-t border-zinc-850 space-y-2.5 text-xs">
               <div className="flex items-center justify-between text-[11px] text-zinc-400">
                 <span>Resolução de Saída:</span>
-                <span className="font-mono text-zinc-200 font-semibold">Super-Resolução 4x</span>
+                <span className="font-mono text-zinc-200 font-semibold">
+                  {scale > 1 ? `Super-resolução ${scale}×` : 'Resolução original'}
+                </span>
               </div>
               <div className="flex items-center justify-between text-[11px] text-zinc-400">
                 <span>Tamanho do Tile:</span>
@@ -570,7 +675,7 @@ export const Sidebar: React.FC = () => {
                   <>
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400 shrink-0" />
                     <span>
-                      {isClassicMode ? 'Processando 4K...' : 'Processando Realismo IA + 4K...'}
+                      {isClassicMode ? 'Processando...' : 'Processando Realismo IA...'}
                     </span>
                   </>
                 )}
@@ -614,12 +719,12 @@ export const Sidebar: React.FC = () => {
           {isProcessing ? (
             <>
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Renderizando em 4K...
+              Processando...
             </>
           ) : (
             <>
               <Sparkles className="h-4 w-4 mr-2 text-amber-600" />
-              Aprimorar em 4K
+              {scale > 1 ? 'Aprimorar e ampliar 4×' : 'Aprimorar imagem'}
             </>
           )}
         </Button>
@@ -632,7 +737,7 @@ export const Sidebar: React.FC = () => {
             className="w-full h-9 text-xs border border-emerald-700/60 bg-emerald-950/40 text-emerald-300 hover:bg-emerald-900/50"
           >
             <Download className="h-3.5 w-3.5 mr-2 text-emerald-400" />
-            Download 4K (PNG)
+            Baixar PNG ({job.width && job.height ? `${job.width} × ${job.height}` : 'resultado'})
           </Button>
         )}
       </div>

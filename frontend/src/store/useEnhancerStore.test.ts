@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useEnhancerStore, DEFAULT_PARAMETERS, PRESETS } from './useEnhancerStore';
 import * as apiClient from '@/api/client';
+import * as imageLib from '@/lib/image';
 
 describe('useEnhancerStore', () => {
   beforeEach(() => {
@@ -463,5 +464,150 @@ describe('useEnhancerStore', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/capabilities');
     expect(caps.render_modes).toEqual(['classic', 'generative']);
     expect(caps.generative_engine.base_model).toBe('emilianJR/epiCRealism');
+  });
+});
+
+describe('primeira experiência e recursos opcionais', () => {
+  const featureStatus = (ready: boolean, state: 'idle' | 'running' | 'failed' | 'done' = 'idle', extra = {}) => ({
+    ready,
+    available: true,
+    reason: null,
+    warning: null,
+    download_bytes: ready ? 0 : 67051650,
+    disk_bytes: 67051650,
+    summary: '',
+    task: {
+      feature: 'upscale_4x' as const,
+      state,
+      progress: state === 'done' ? 100 : 0,
+      stage: '',
+      error: state === 'failed' ? 'sem conexão' : null,
+      unavailable: false,
+      bytes_done: 0,
+      bytes_total: 0,
+    },
+    ...extra,
+  });
+  const featuresResponse = (upscaleReady: boolean, realismoReady: boolean, upscaleState: any = 'idle') => ({
+    bundled: true,
+    features: {
+      upscale_4x: featureStatus(upscaleReady, upscaleState),
+      realismo_ia: featureStatus(realismoReady),
+    },
+  });
+
+  beforeEach(() => {
+    useEnhancerStore.setState({ features: null, pendingActivation: null, featuresError: null, sampleError: null });
+    useEnhancerStore.getState().resetParameters();
+    useEnhancerStore.getState().clearImage();
+  });
+
+  afterEach(() => {
+    useEnhancerStore.setState({ features: null, pendingActivation: null, featuresError: null });
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('a amostra usa a rota real em modo Clássico, resolução original, e libera o download', async () => {
+    vi.useFakeTimers();
+    const sampleFile = new File(['jpg'], 'amostra_promob.jpg', { type: 'image/jpeg' });
+    vi.spyOn(apiClient, 'fetchSampleFile').mockResolvedValue(sampleFile);
+    vi.spyOn(imageLib, 'readImageSource').mockResolvedValue({
+      file: sampleFile,
+      objectUrl: 'blob:amostra',
+      width: 1024,
+      height: 698,
+      name: 'amostra_promob.jpg',
+      size: 3,
+    });
+    vi.spyOn(apiClient, 'requestPreview').mockResolvedValue('blob:preview-amostra');
+    const submitSpy = vi.spyOn(apiClient, 'submitEnhancement').mockResolvedValue({ job_id: 'job-amostra', status: 'processing' });
+    vi.spyOn(apiClient, 'pollJob').mockResolvedValue({
+      job_id: 'job-amostra',
+      status: 'completed',
+      progress: 100,
+      stage: 'ok',
+      width: 1024,
+      height: 698,
+    });
+
+    await useEnhancerStore.getState().trySample();
+    expect(submitSpy).toHaveBeenCalledTimes(1);
+    const params = submitSpy.mock.calls[0][1];
+    expect(params.render_mode).toBe('classic');
+    expect(params.upscale_factor).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(750);
+    const state = useEnhancerStore.getState();
+    expect(state.job.status).toBe('completed');
+    expect(state.enhanced4kUrl).toBe('/api/download/job-amostra');
+    expect(state.original?.objectUrl).toBe('blob:amostra');
+  });
+
+  it('mostra erro amigável se a amostra não carregar', async () => {
+    vi.spyOn(apiClient, 'fetchSampleFile').mockRejectedValue(new Error('Amostra não encontrada'));
+    await useEnhancerStore.getState().trySample();
+    expect(useEnhancerStore.getState().sampleError).toBe('Amostra não encontrada');
+    expect(useEnhancerStore.getState().sampleLoading).toBe(false);
+  });
+
+  it('sem modelos baixados, o padrão vira Clássico em resolução original', async () => {
+    vi.spyOn(apiClient, 'fetchFeatures').mockResolvedValue(featuresResponse(false, false));
+    expect(useEnhancerStore.getState().parameters.render_mode).toBe('generative');
+    await useEnhancerStore.getState().fetchFeatures();
+    const state = useEnhancerStore.getState();
+    expect(state.parameters.render_mode).toBe('classic');
+    expect(state.parameters.upscale_factor).toBe(1);
+    expect(state.activePreset).toBe('natural');
+  });
+
+  it('não envia Realismo IA nem 4× antes da ativação', async () => {
+    vi.spyOn(apiClient, 'fetchFeatures').mockResolvedValue(featuresResponse(false, false));
+    await useEnhancerStore.getState().fetchFeatures();
+    const submitSpy = vi.spyOn(apiClient, 'submitEnhancement');
+    vi.spyOn(apiClient, 'requestPreview').mockResolvedValue('blob:p');
+    useEnhancerStore.getState().setOriginalImage({
+      file: new File(['x'], 'a.jpg', { type: 'image/jpeg' }),
+      objectUrl: 'blob:a',
+      width: 10,
+      height: 10,
+      name: 'a.jpg',
+      size: 1,
+    });
+    useEnhancerStore.getState().updateParameter('upscale_factor', 4);
+    await useEnhancerStore.getState().startEnhancement();
+    expect(submitSpy).not.toHaveBeenCalled();
+    expect(useEnhancerStore.getState().job.status).toBe('failed');
+    expect(useEnhancerStore.getState().job.error).toMatch(/4×/);
+  });
+
+  it('ativação com falha permite tentar de novo e passa a usar 4× quando conclui', async () => {
+    vi.useFakeTimers();
+    const fetchSpy = vi.spyOn(apiClient, 'fetchFeatures');
+    const activateSpy = vi.spyOn(apiClient, 'activateFeature').mockResolvedValue();
+    fetchSpy.mockResolvedValueOnce(featuresResponse(false, false));
+    await useEnhancerStore.getState().fetchFeatures();
+
+    // 1ª tentativa: falha de rede
+    fetchSpy.mockResolvedValueOnce(featuresResponse(false, false, 'running'));
+    await useEnhancerStore.getState().activateFeature('upscale_4x');
+    expect(useEnhancerStore.getState().pendingActivation).toBe('upscale_4x');
+    fetchSpy.mockResolvedValueOnce(featuresResponse(false, false, 'failed'));
+    await vi.advanceTimersByTimeAsync(1100);
+    let state = useEnhancerStore.getState();
+    expect(state.features?.features.upscale_4x.task.state).toBe('failed');
+    expect(state.pendingActivation).toBeNull();
+    expect(state.parameters.upscale_factor).toBe(1);
+
+    // 2ª tentativa: conclui e seleciona 4×
+    fetchSpy.mockResolvedValueOnce(featuresResponse(false, false, 'running'));
+    await useEnhancerStore.getState().activateFeature('upscale_4x');
+    fetchSpy.mockResolvedValue(featuresResponse(true, false, 'done'));
+    await vi.advanceTimersByTimeAsync(1100);
+    state = useEnhancerStore.getState();
+    expect(activateSpy).toHaveBeenCalledTimes(2);
+    expect(state.features?.features.upscale_4x.ready).toBe(true);
+    expect(state.parameters.upscale_factor).toBe(4);
+    expect(state.pendingActivation).toBeNull();
   });
 });

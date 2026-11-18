@@ -13,10 +13,11 @@ import {
 } from 'lucide-react';
 
 export const StatusBar: React.FC = () => {
-  const { original, job, zoom, setZoom, isPreviewLoading } = useEnhancerStore();
+  const { original, job, zoom, setZoom, isPreviewLoading, parameters } = useEnhancerStore();
 
-  const targetWidth = original ? original.width * 4 : 3840;
-  const targetHeight = original ? original.height * 4 : 2160;
+  const scale = parameters.upscale_factor;
+  const targetWidth = original ? original.width * scale : 0;
+  const targetHeight = original ? original.height * scale : 0;
 
   return (
     <footer className="h-8 border-t border-zinc-800 bg-zinc-950 px-3 flex items-center justify-between text-[11px] text-zinc-400 select-none z-30">
@@ -29,7 +30,7 @@ export const StatusBar: React.FC = () => {
               <span>{original.width} × {original.height}</span>
               <span className="text-zinc-600">→</span>
               <span className="text-emerald-400 font-medium">
-                4K: {job.width || targetWidth} × {job.height || targetHeight}
+                Saída: {job.width || targetWidth} × {job.height || targetHeight}
               </span>
             </div>
 
@@ -68,7 +69,7 @@ export const StatusBar: React.FC = () => {
         {job.status === 'completed' && (
           <div className="flex items-center gap-1.5 text-emerald-400 font-medium">
             <CheckCircle2 className="h-3.5 w-3.5" />
-            <span>4K Concluído</span>
+            <span>Concluído</span>
             {job.processing_time_seconds && (
               <span className="text-zinc-400 font-mono text-[10px]">
                 ({formatSeconds(job.processing_time_seconds)})
