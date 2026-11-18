@@ -27,17 +27,33 @@ function Check($cond, $msg) {
 }
 
 # Start-Process -Credential herda o ambiente de quem chamou (o administrador do runner).
-# Usa as pastas reais do perfil desta conta, como num logon normal.
-$env:USERPROFILE = [Environment]::GetFolderPath("UserProfile")
-$env:LOCALAPPDATA = [Environment]::GetFolderPath("LocalApplicationData")
-$env:APPDATA = [Environment]::GetFolderPath("ApplicationData")
+# Usa as pastas reais do perfil desta conta, como num logon normal. Quando a consulta ao
+# Windows volta vazia (conta criada na hora, perfil recém-carregado), deriva o caminho do
+# perfil da própria conta em vez de prosseguir com uma variável nula.
+$id = [Security.Principal.WindowsIdentity]::GetCurrent()
+$account = ($id.Name -split '\\')[-1]
+$reportedProfile = [Environment]::GetFolderPath("UserProfile")
+$reportedLocalAppData = [Environment]::GetFolderPath("LocalApplicationData")
+$reportedAppData = [Environment]::GetFolderPath("ApplicationData")
+$diag = "USERPROFILE={0} | GetFolderPath(UserProfile)={1} | LOCALAPPDATA={2} | GetFolderPath(LocalApplicationData)={3} | APPDATA={4} | GetFolderPath(ApplicationData)={5}" -f $env:USERPROFILE, $reportedProfile, $env:LOCALAPPDATA, $reportedLocalAppData, $env:APPDATA, $reportedAppData
+Write-Host "Diagnóstico: $diag"
+Write-Host "Pastas em $($env:SystemDrive)\Users: $((Get-ChildItem "$($env:SystemDrive)\Users" -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name) -join ', ')"
+
+$profileDir = if ($reportedProfile) { $reportedProfile } else { Join-Path "$($env:SystemDrive)\Users" $account }
+for ($i = 0; $i -lt 60 -and -not (Test-Path $profileDir); $i++) { Start-Sleep -Milliseconds 500 }
+$localAppData = if ($reportedLocalAppData) { $reportedLocalAppData } else { Join-Path $profileDir "AppData\Local" }
+$appData = if ($reportedAppData) { $reportedAppData } else { Join-Path $profileDir "AppData\Roaming" }
+New-Item -ItemType Directory -Force $localAppData, $appData | Out-Null
+$env:USERPROFILE = $profileDir
+$env:LOCALAPPDATA = $localAppData
+$env:APPDATA = $appData
 $env:TEMP = Join-Path $env:LOCALAPPDATA "Temp"; $env:TMP = $env:TEMP
 New-Item -ItemType Directory -Force $env:TEMP | Out-Null
-Write-Host "Perfil: $env:USERPROFILE | LOCALAPPDATA: $env:LOCALAPPDATA"
+Write-Host "Em uso: perfil=$env:USERPROFILE | LOCALAPPDATA=$env:LOCALAPPDATA | APPDATA=$env:APPDATA"
 $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
-$id = [Security.Principal.WindowsIdentity]::GetCurrent()
 $isAdmin = ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 Write-Host "Usuário: $($id.Name) | administrador: $isAdmin"
+Check (Test-Path $env:USERPROFILE) "perfil da conta existe ($env:USERPROFILE)"
 Check (-not $isAdmin) "teste executado por conta comum (sem privilégios de administrador)"
 foreach ($tool in "python", "git", "node", "npm", "uv") {
     Check (-not (Get-Command $tool -ErrorAction SilentlyContinue)) "ferramenta de desenvolvimento '$tool' fora do PATH"
