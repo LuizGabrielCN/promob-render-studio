@@ -121,7 +121,8 @@ if (-not $Iscc) {
 if (-not $Iscc) { throw "ISCC.exe (Inno Setup 6) não encontrado. Use -SkipInstaller ou informe -Iscc." }
 
 Step "Compilando o instalador com $Iscc"
-Invoke-Checked $Iscc @("/Qp", "/DAppVersion=$Version", "/DStageDir=$Stage", "/DOutputDir=$Out", "packaging\windows\installer.iss")
+$NumericVersion = ($Version -replace '[^0-9.].*$', '').TrimEnd('.')
+Invoke-Checked $Iscc @("/Qp", "/DAppVersion=$Version", "/DNumericVersion=$NumericVersion", "/DStageDir=$Stage", "/DOutputDir=$Out", "packaging\windows\installer.iss")
 $Setup = Join-Path $Out "PromobRenderStudio-Setup.exe"
 
 if ($env:SIGNTOOL_CERT_BASE64) {

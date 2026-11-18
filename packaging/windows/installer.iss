@@ -6,6 +6,9 @@
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
+#ifndef NumericVersion
+  #define NumericVersion "0.0.0"
+#endif
 #ifndef StageDir
   #error StageDir não informado (use build.ps1)
 #endif
@@ -26,7 +29,7 @@ AppPublisher=Promob Render Studio (código aberto, MIT)
 AppPublisherURL={#AppUrl}
 AppSupportURL={#AppUrl}/issues
 AppUpdatesURL={#AppUrl}/releases
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#NumericVersion}
 DefaultDirName={localappdata}\Programs\{#AppName}
 DisableDirPage=auto
 DefaultGroupName={#AppName}
