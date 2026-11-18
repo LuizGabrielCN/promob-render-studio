@@ -107,3 +107,34 @@ export interface ViewerState {
   mode: 'split' | 'side-by-side' | 'original-hold';
   zoom: number;
 }
+
+export type FeatureKey = 'upscale_4x' | 'realismo_ia';
+
+export interface FeatureTask {
+  feature: FeatureKey;
+  state: 'idle' | 'running' | 'failed' | 'done';
+  progress: number;
+  stage: string;
+  error: string | null;
+  unavailable: boolean;
+  bytes_done: number;
+  bytes_total: number;
+}
+
+export interface FeatureStatus {
+  ready: boolean;
+  available: boolean;
+  reason: string | null;
+  warning: string | null;
+  download_bytes: number;
+  disk_bytes: number;
+  summary: string;
+  task: FeatureTask;
+  gpu?: { name: string; driver_version: string; vram_mb: number } | null;
+  packages_installed?: boolean;
+}
+
+export interface FeaturesResponse {
+  bundled: boolean;
+  features: Record<FeatureKey, FeatureStatus>;
+}

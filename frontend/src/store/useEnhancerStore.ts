@@ -6,6 +6,8 @@ import {
   HardwareStatus,
   JobProgress,
   ImageSource,
+  FeatureKey,
+  FeaturesResponse,
 } from '@/types';
 import {
   fetchHealth,
@@ -13,7 +15,11 @@ import {
   submitEnhancement,
   pollJob,
   getDownloadUrl,
+  fetchFeatures as apiFetchFeatures,
+  activateFeature as apiActivateFeature,
+  fetchSampleFile,
 } from '@/api/client';
+import { readImageSource } from '@/lib/image';
 
 export const DEFAULT_PARAMETERS: EnhancementParameters = {
   temperature: 0.04,        // Subtle warmth while preserving paint and material colors
@@ -132,6 +138,39 @@ export const PRESETS: Record<Exclude<PresetKey, 'personalizado'>, Preset> = {
   },
 };
 
+/** Parâmetros da primeira experiência: modo Clássico, resolução original, CPU, sem pesos de IA. */
+export const SAMPLE_PARAMETERS: Partial<EnhancementParameters> = {
+  ...PRESETS.natural.params,
+  render_mode: 'classic',
+  upscale_factor: 1,
+};
+
+/** Ajusta os padrões ao que está ativado neste computador (ex.: instalador sem pesos de IA). */
+function adaptToFeatures(
+  parameters: EnhancementParameters,
+  activePreset: PresetKey,
+  features: FeaturesResponse | null
+): { parameters: EnhancementParameters; activePreset: PresetKey } {
+  if (!features) return { parameters, activePreset };
+  // Devolve o mesmo objeto quando nada muda: o store usa a identidade para saber se precisa
+  // descartar um resultado já pronto (ex.: a amostra terminou antes desta leitura chegar).
+  let next = parameters;
+  let preset = activePreset;
+  if (!features.features.realismo_ia.ready && next.render_mode === 'generative') {
+    next = { ...next, ...PRESETS.natural.params, render_mode: 'classic' };
+    preset = 'natural';
+  }
+  if (!features.features.upscale_4x.ready && next.upscale_factor > 1) {
+    next = { ...next, upscale_factor: 1 };
+  }
+  return { parameters: next, activePreset: preset };
+}
+
+export function isFeatureRunning(features: FeaturesResponse | null): boolean {
+  if (!features) return false;
+  return Object.values(features.features).some((f) => f.task.state === 'running');
+}
+
 interface EnhancerStoreState {
   // Original Image
   original: ImageSource | null;
@@ -163,6 +202,18 @@ interface EnhancerStoreState {
   hardware: HardwareStatus | null;
   fetchHardware: () => Promise<void>;
 
+  // Recursos opcionais (4K e Realismo IA)
+  features: FeaturesResponse | null;
+  featuresError: string | null;
+  pendingActivation: FeatureKey | null;
+  fetchFeatures: () => Promise<void>;
+  activateFeature: (feature: FeatureKey) => Promise<void>;
+
+  // Primeira experiência
+  sampleLoading: boolean;
+  sampleError: string | null;
+  trySample: () => Promise<void>;
+
   // Interactive Viewer State
   sliderPos: number;
   setSliderPos: (pos: number) => void;
@@ -181,6 +232,14 @@ let previewAbortController: AbortController | null = null;
 let previewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let pollingIntervalTimer: ReturnType<typeof setInterval> | null = null;
 let activeEnhancementSession = 0;
+let featuresPollTimer: ReturnType<typeof setInterval> | null = null;
+
+function clearFeaturesPoll() {
+  if (featuresPollTimer) {
+    clearInterval(featuresPollTimer);
+    featuresPollTimer = null;
+  }
+}
 
 function clearPollingTimer() {
   if (pollingIntervalTimer) {
@@ -304,9 +363,10 @@ export const useEnhancerStore = create<EnhancerStoreState>((set, get) => ({
   },
 
   resetParameters: () => {
+    const adapted = adaptToFeatures({ ...DEFAULT_PARAMETERS }, 'realismo_ia', get().features);
     set({
-      parameters: { ...DEFAULT_PARAMETERS },
-      activePreset: 'realismo_ia',
+      parameters: adapted.parameters,
+      activePreset: adapted.activePreset,
       enhanced4kUrl: null,
     });
     get().requestPreviewDebounced();
@@ -344,8 +404,19 @@ export const useEnhancerStore = create<EnhancerStoreState>((set, get) => ({
   },
 
   startEnhancement: async () => {
-    const { original, parameters, job } = get();
-    if (!original || !original.file || job.status === 'processing') return;
+    const { original, parameters, job, features } = get();
+    if (!original || !original.file || job.status === 'processing' || job.status === 'uploading') return;
+
+    const blocked =
+      features && parameters.render_mode === 'generative' && !features.features.realismo_ia.ready
+        ? 'O Realismo IA ainda não está ativado neste computador. Ative-o no painel ou use o modo Clássico.'
+        : features && parameters.upscale_factor > 1 && !features.features.upscale_4x.ready
+          ? 'A ampliação 4× ainda não está ativada. Baixe o modelo no painel ou mantenha a resolução original.'
+          : null;
+    if (blocked) {
+      set({ job: { job_id: null, status: 'failed', progress: 0, stage: blocked, error: blocked } });
+      return;
+    }
 
     activeEnhancementSession += 1;
     const sessionId = activeEnhancementSession;
@@ -460,13 +531,102 @@ export const useEnhancerStore = create<EnhancerStoreState>((set, get) => ({
       set({
         hardware: {
           status: 'offline',
-          gpu: 'NVIDIA RTX 2060 (Local Fallback)',
-          vram_free_mb: 4800,
-          cuda_available: true,
-          total_vram_mb: 6144,
-          allocated_vram_mb: 1344,
+          gpu: 'Servidor offline',
+          vram_free_mb: 0,
+          cuda_available: false,
+          total_vram_mb: 0,
+          allocated_vram_mb: 0,
         },
       });
+    }
+  },
+
+  // Recursos opcionais
+  features: null,
+  featuresError: null,
+  pendingActivation: null,
+
+  fetchFeatures: async () => {
+    try {
+      const data = await apiFetchFeatures();
+      const { features: previous, pendingActivation, parameters, activePreset } = get();
+      let nextParams = parameters;
+      let nextPreset = activePreset;
+      let pending = pendingActivation;
+
+      if (previous === null) {
+        // Primeira leitura: não deixa selecionado um modo que ainda não foi baixado.
+        const adapted = adaptToFeatures(parameters, activePreset, data);
+        nextParams = adapted.parameters;
+        nextPreset = adapted.activePreset;
+      }
+      if (pending && data.features[pending].ready) {
+        // A pessoa pediu este recurso: passa a usá-lo assim que o download termina.
+        if (pending === 'realismo_ia') {
+          nextParams = { ...nextParams, ...PRESETS.realismo_ia.params, render_mode: 'generative' };
+          nextPreset = 'realismo_ia';
+        } else {
+          nextParams = { ...nextParams, upscale_factor: 4 };
+        }
+        pending = null;
+      } else if (pending && data.features[pending].task.state === 'failed') {
+        pending = null;
+      }
+
+      const paramsChanged = nextParams !== parameters;
+      set({
+        features: data,
+        featuresError: null,
+        pendingActivation: pending,
+        parameters: nextParams,
+        activePreset: nextPreset,
+        ...(paramsChanged ? { enhanced4kUrl: null } : {}),
+      });
+      if (paramsChanged) get().requestPreviewDebounced();
+
+      if (isFeatureRunning(data)) {
+        if (!featuresPollTimer) {
+          featuresPollTimer = setInterval(() => {
+            get().fetchFeatures();
+          }, 1000);
+        }
+      } else {
+        clearFeaturesPoll();
+      }
+    } catch (e: any) {
+      set({ featuresError: e?.message || 'Falha ao consultar recursos opcionais.' });
+      clearFeaturesPoll();
+    }
+  },
+
+  activateFeature: async (feature) => {
+    set({ pendingActivation: feature, featuresError: null });
+    try {
+      await apiActivateFeature(feature);
+    } catch (e: any) {
+      set({ pendingActivation: null, featuresError: e?.message || 'Não foi possível iniciar o download.' });
+    }
+    await get().fetchFeatures();
+  },
+
+  // Primeira experiência
+  sampleLoading: false,
+  sampleError: null,
+
+  trySample: async () => {
+    set({ sampleLoading: true, sampleError: null });
+    try {
+      const file = await fetchSampleFile();
+      const image = await readImageSource(file);
+      set((state) => ({
+        parameters: { ...state.parameters, ...SAMPLE_PARAMETERS },
+        activePreset: 'natural',
+      }));
+      get().setOriginalImage(image);
+      set({ sampleLoading: false });
+      await get().startEnhancement();
+    } catch (e: any) {
+      set({ sampleLoading: false, sampleError: e?.message || 'Erro ao carregar a amostra.' });
     }
   },
 

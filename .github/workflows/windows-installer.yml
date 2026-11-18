@@ -1,0 +1,135 @@
+name: Instalador Windows
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "packaging/windows/**"
+      - "scripts/ui_walkthrough.py"
+      - ".github/workflows/windows-installer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.11.19"
+  PYTHON_VERSION: "3.11.15"
+  INNO_SETUP_VERSION: "6.7.1"
+
+jobs:
+  build:
+    name: Build do instalador
+    runs-on: windows-2022
+    timeout-minutes: 40
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Versão
+        id: version
+        shell: pwsh
+        run: |
+          $v = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.0.0-dev.$env:GITHUB_RUN_NUMBER" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+      - name: Inno Setup ${{ env.INNO_SETUP_VERSION }}
+        shell: pwsh
+        run: |
+          choco install innosetup --version $env:INNO_SETUP_VERSION -y --no-progress --allow-downgrade
+          $iscc = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) { throw "ISCC.exe não encontrado" }
+          "ISCC=$iscc" >> $env:GITHUB_ENV
+      - name: Montar pacote e compilar instalador
+        shell: pwsh
+        env:
+          # Assinatura opcional: configure estes segredos para assinar o instalador.
+          SIGNTOOL_CERT_BASE64: ${{ secrets.SIGNTOOL_CERT_BASE64 }}
+          SIGNTOOL_CERT_PASSWORD: ${{ secrets.SIGNTOOL_CERT_PASSWORD }}
+        run: >-
+          ./packaging/windows/build.ps1 -Version "${{ steps.version.outputs.version }}"
+          -PythonVersion $env:PYTHON_VERSION -Iscc $env:ISCC
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PromobRenderStudio-Setup
+          path: |
+            build/windows/PromobRenderStudio-Setup.exe
+            build/windows/PromobRenderStudio-Setup.exe.sha256
+          if-no-files-found: error
+
+  install-test:
+    name: Instalação como conta comum
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@v4
+        with:
+          name: PromobRenderStudio-Setup
+          path: dist
+      - name: Conferir SHA-256
+        shell: pwsh
+        run: |
+          $expected = (Get-Content dist/PromobRenderStudio-Setup.exe.sha256).Split(" ")[0]
+          $actual = (Get-FileHash dist/PromobRenderStudio-Setup.exe -Algorithm SHA256).Hash.ToLower()
+          if ($expected -ne $actual) { throw "SHA-256 diferente: $expected vs $actual" }
+          "SHA-256 OK: $actual"
+      - name: Instalar, usar e desinstalar como usuário sem privilégios
+        shell: pwsh
+        run: |
+          # Conta local comum (grupo Usuários), criada só nesta VM descartável do CI.
+          $user = "promobteste"
+          $password = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 20 | ForEach-Object { [char]$_ }) + "!a1"
+          $secure = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name $user -Password $secure -PasswordNeverExpires | Out-Null
+          Add-LocalGroupMember -Group "Users" -Member $user
+          $work = "C:\promob-teste"
+          New-Item -ItemType Directory -Force $work | Out-Null
+          Copy-Item dist\PromobRenderStudio-Setup.exe, packaging\windows\install_test.ps1, scripts\ui_walkthrough.py $work
+          icacls $work /grant "${user}:(OI)(CI)M" | Out-Null
+          $cred = New-Object System.Management.Automation.PSCredential($user, $secure)
+          $p = Start-Process powershell.exe -Credential $cred -LoadUserProfile -WorkingDirectory $work -Wait -PassThru -ArgumentList @(
+            "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$work\install_test.ps1",
+            "-Setup", "$work\PromobRenderStudio-Setup.exe", "-Walkthrough", "$work\ui_walkthrough.py", "-OutDir", "$work\resultado")
+          Get-Content "$work\resultado\install-test.log" -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force install-test | Out-Null
+          Copy-Item -Recurse "$work\resultado\*" install-test -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { throw "Teste de instalação falhou (código $($p.ExitCode))" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: teste-instalacao
+          path: install-test
+
+  release:
+    name: Publicar no GitHub Releases
+    if: github.ref_type == 'tag'
+    needs: [build, install-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: PromobRenderStudio-Setup
+          path: dist
+      - name: Anexar instalador à versão
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+          fi

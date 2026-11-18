@@ -20,7 +20,15 @@ MODEL_FILENAME = "realesrgan_x4plus.onnx"
 MODEL_SHA256 = "ec90f9f71386729be0d7ffb324ac4c61a55f3539c8e7ff42ab57984952005ce9"
 MODEL_EXPECTED_SIZE = 67051650
 HF_REPO_ID = "othytenk/realesrgan-x4plus"
-HF_DIRECT_URL = f"https://huggingface.co/{HF_REPO_ID}/resolve/main/{MODEL_FILENAME}"
+
+
+def model_download_url() -> str:
+    """URL direta do peso no Hugging Face. Respeita HF_ENDPOINT (espelhos e testes de falha)."""
+    endpoint = os.environ.get("HF_ENDPOINT", "https://huggingface.co").rstrip("/")
+    return f"{endpoint}/{HF_REPO_ID}/resolve/main/{MODEL_FILENAME}"
+
+
+HF_DIRECT_URL = model_download_url()
 
 DEFAULT_TILE_SIZE = 256
 DEFAULT_PADDING = 32
@@ -42,30 +50,22 @@ def verify_file_sha256(filepath: str, expected_hash: str) -> bool:
         return False
 
 
-def resolve_model_path(
-    model_dir: Optional[str] = None,
-    progress_callback: Optional[Callable[[float, str], None]] = None,
-) -> str:
-    """
-    Locates or automatically downloads the Real-ESRGAN x4plus ONNX model.
-    Checks:
-      1. Local project models directory.
-      2. HuggingFace Hub local cache.
-      3. User app cache directory.
-    If not found, downloads automatically from HuggingFace.
-    """
+def _candidate_model_paths(model_dir: Optional[str] = None) -> List[str]:
+    """Ordered list of places where an existing Real-ESRGAN ONNX file is accepted."""
     candidates = []
     if model_dir:
         candidates.append(os.path.join(model_dir, MODEL_FILENAME))
 
+    # Diretório de modelos do aplicativo instalado (fora da pasta do programa)
+    env_dir = os.environ.get("PROMOB_MODELS_DIR")
+    if env_dir:
+        candidates.append(os.path.join(env_dir, MODEL_FILENAME))
+
     # Project models/ directory relative to this module
-    module_dir = os.path.dirname(os.path.abspath(__file__))
-    project_models_dir = os.path.abspath(os.path.join(module_dir, "..", "..", "..", "models"))
-    candidates.append(os.path.join(project_models_dir, MODEL_FILENAME))
+    candidates.append(os.path.join(_project_models_dir(), MODEL_FILENAME))
 
     # User cache directory
-    user_cache = os.path.join(os.path.expanduser("~"), ".cache", "promob_enhancer", "models")
-    candidates.append(os.path.join(user_cache, MODEL_FILENAME))
+    candidates.append(os.path.join(_user_cache_dir(), MODEL_FILENAME))
 
     # Hugging Face default cache
     hf_cache_dir = os.path.join(
@@ -80,54 +80,116 @@ def resolve_model_path(
         for root, _, files in os.walk(hf_cache_dir):
             if MODEL_FILENAME in files:
                 candidates.append(os.path.join(root, MODEL_FILENAME))
+    return candidates
 
-    for candidate in candidates:
+
+def _project_models_dir() -> str:
+    module_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.abspath(os.path.join(module_dir, "..", "..", "..", "models"))
+
+
+def _user_cache_dir() -> str:
+    return os.path.join(os.path.expanduser("~"), ".cache", "promob_enhancer", "models")
+
+
+def find_existing_model(model_dir: Optional[str] = None) -> Optional[str]:
+    """Returns the path of an already-downloaded model with the expected size, or None."""
+    for candidate in _candidate_model_paths(model_dir):
         if os.path.exists(candidate) and os.path.getsize(candidate) == MODEL_EXPECTED_SIZE:
-            logger.info(f"Located existing Real-ESRGAN model at: {candidate}")
             return candidate
+    return None
 
-    # If missing, download to project models dir or user cache
-    target_dir = project_models_dir if os.access(os.path.dirname(project_models_dir), os.W_OK) else user_cache
+
+def default_download_dir() -> str:
+    """Where a missing model is downloaded: PROMOB_MODELS_DIR, project models/ or the user cache."""
+    env_dir = os.environ.get("PROMOB_MODELS_DIR")
+    if env_dir:
+        return env_dir
+    project_models_dir = _project_models_dir()
+    if os.access(os.path.dirname(project_models_dir), os.W_OK):
+        return project_models_dir
+    return _user_cache_dir()
+
+
+def download_model(
+    target_dir: Optional[str] = None,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    timeout: float = 30.0,
+) -> str:
+    """
+    Downloads the Real-ESRGAN ONNX file to ``target_dir`` and verifies its SHA-256.
+    ``progress_callback(bytes_done, bytes_total)`` is called while streaming.
+    Raises RuntimeError on network errors or hash mismatch, leaving no partial file behind.
+    """
+    target_dir = target_dir or default_download_dir()
     os.makedirs(target_dir, exist_ok=True)
     target_path = os.path.join(target_dir, MODEL_FILENAME)
     temp_path = target_path + ".tmp"
+    url = model_download_url()
 
-    logger.info(f"Downloading Real-ESRGAN x4plus ONNX model to {target_path}...")
-    if progress_callback:
-        progress_callback(0.0, "Iniciando download do modelo de super-resolução...")
-
+    logger.info(f"Downloading Real-ESRGAN x4plus ONNX model from {url} to {target_path}...")
     try:
-        try:
-            from huggingface_hub import hf_hub_download
-            downloaded = hf_hub_download(
-                repo_id=HF_REPO_ID,
-                filename=MODEL_FILENAME,
-                local_dir=target_dir,
-            )
-            if os.path.exists(downloaded) and verify_file_sha256(downloaded, MODEL_SHA256):
-                return downloaded
-        except ImportError:
-            pass
-
-        def reporthook(block_num: int, block_size: int, total_size: int):
-            if total_size > 0 and progress_callback:
-                fraction = min(1.0, (block_num * block_size) / total_size)
-                progress_callback(fraction * 0.1, f"Baixando modelo 4K ({fraction*100:.1f}%)...")
-
-        urllib.request.urlretrieve(HF_DIRECT_URL, temp_path, reporthook=reporthook)
+        request = urllib.request.Request(url, headers={"User-Agent": "promob-render-studio"})
+        with urllib.request.urlopen(request, timeout=timeout) as response, open(temp_path, "wb") as out:
+            total = int(response.headers.get("Content-Length") or MODEL_EXPECTED_SIZE)
+            done = 0
+            if progress_callback:
+                progress_callback(0, total)
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                done += len(chunk)
+                if progress_callback:
+                    progress_callback(done, total)
 
         if not verify_file_sha256(temp_path, MODEL_SHA256):
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            raise RuntimeError("Model download verification failed: SHA-256 mismatch.")
+            raise RuntimeError("o arquivo baixado não confere com o SHA-256 esperado")
 
         os.replace(temp_path, target_path)
         logger.info(f"Model downloaded and verified successfully: {target_path}")
         return target_path
     except Exception as e:
         if os.path.exists(temp_path):
-            os.remove(temp_path)
-        raise RuntimeError(f"Failed to acquire Real-ESRGAN model: {e}")
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+        reason = getattr(e, "reason", None) or e
+        raise RuntimeError(
+            "Não foi possível baixar o modelo Real-ESRGAN. Verifique a conexão com a internet e "
+            f"tente novamente. (Detalhe técnico: {reason})"
+        ) from e
+
+
+def resolve_model_path(
+    model_dir: Optional[str] = None,
+    progress_callback: Optional[Callable[[float, str], None]] = None,
+) -> str:
+    """
+    Locates or automatically downloads the Real-ESRGAN x4plus ONNX model.
+    Checks:
+      1. Explicit model_dir and PROMOB_MODELS_DIR.
+      2. Local project models directory.
+      3. User app cache directory.
+      4. HuggingFace Hub local cache.
+    If not found, downloads automatically from HuggingFace.
+    """
+    existing = find_existing_model(model_dir)
+    if existing:
+        logger.info(f"Located existing Real-ESRGAN model at: {existing}")
+        return existing
+
+    if progress_callback:
+        progress_callback(0.0, "Iniciando download do modelo de super-resolução...")
+
+    def _bytes_progress(done: int, total: int) -> None:
+        if progress_callback and total > 0:
+            fraction = min(1.0, done / total)
+            progress_callback(fraction * 0.1, f"Baixando modelo 4K ({fraction*100:.1f}%)...")
+
+    return download_model(default_download_dir(), progress_callback=_bytes_progress)
 
 
 def create_hanning_window(h: int, w: int) -> np.ndarray:

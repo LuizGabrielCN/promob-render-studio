@@ -1,5 +1,7 @@
 import {
   EngineCapabilities,
+  FeatureKey,
+  FeaturesResponse,
   EnhancementParameters,
   HardwareStatus,
   JobProgress,
@@ -102,4 +104,40 @@ export async function pollJob(jobId: string): Promise<JobProgress> {
 
 export function getDownloadUrl(jobId: string): string {
   return `${API_BASE}/download/${jobId}`;
+}
+
+export async function fetchFeatures(): Promise<FeaturesResponse> {
+  const res = await fetch(`${API_BASE}/features`);
+  if (!res.ok) {
+    throw new Error(`Falha ao consultar recursos opcionais: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function activateFeature(feature: FeatureKey): Promise<void> {
+  const res = await fetch(`${API_BASE}/features/${feature}/activate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      detail = (await res.json()).detail ?? detail;
+    } catch {
+      /* resposta sem JSON */
+    }
+    throw new Error(detail);
+  }
+}
+
+export const SAMPLE_URL = '/samples/promob_sample.jpg';
+
+export async function fetchSampleFile(): Promise<File> {
+  const response = await fetch(SAMPLE_URL);
+  if (!response.ok) {
+    throw new Error(`Amostra não encontrada em ${SAMPLE_URL}`);
+  }
+  const blob = await response.blob();
+  return new File([blob], 'amostra_promob.jpg', { type: blob.type || 'image/jpeg' });
 }

@@ -117,7 +117,7 @@ export const Viewer: React.FC = () => {
           <div className="relative flex-1 flex flex-col items-center justify-center bg-zinc-900/60 rounded-lg border border-zinc-800 p-2 overflow-hidden h-full max-h-[85vh]">
             <div className="absolute top-4 left-4 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded bg-zinc-950/80 backdrop-blur border border-emerald-800/60 text-emerald-300 font-mono text-[11px]">
               <Sparkles className="h-3 w-3 text-amber-400" />
-              <span>{enhanced4kUrl ? 'Aprimorado (4K Studio)' : 'Prévia Interativa'}</span>
+              <span>{enhanced4kUrl ? 'Depois (resultado final)' : 'Prévia Interativa'}</span>
             </div>
             <img
               src={enhancedSrc}
@@ -179,7 +179,7 @@ export const Viewer: React.FC = () => {
           {/* Right Label: Enhanced */}
           <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 px-2.5 py-1 rounded bg-zinc-950/80 backdrop-blur border border-emerald-800/80 text-emerald-300 font-mono text-[11px] shadow-md pointer-events-none">
             <Sparkles className="h-3 w-3 text-amber-400" />
-            <span>{enhanced4kUrl ? 'Depois (4K Studio)' : 'Depois (Prévia)'}</span>
+            <span>{enhanced4kUrl ? 'Depois (resultado final)' : 'Depois (Prévia)'}</span>
           </div>
 
           {/* Spacebar Indicator Toast when holding Space */}

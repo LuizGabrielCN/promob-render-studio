@@ -21,12 +21,24 @@ Exporte o render do Promob no enquadramento desejado. Use PNG quando precisar co
 
 Em cenas que usam a convenção de guias amarelas, confira o LED na prévia e no resultado. Objetos pequenos, texto de poucos pixels e reflexos intensos merecem revisão ampliada.
 
+## App instalado no Windows
+
+| Sintoma | O que fazer |
+| --- | --- |
+| Cliquei no atalho e nada abriu. | Aguarde alguns segundos: o navegador abre quando o servidor fica pronto. Se aparecer uma mensagem de erro, ela indica o log em `%LOCALAPPDATA%\PromobRenderStudio\logs`. |
+| Abri o app duas vezes. | Não há problema. A segunda abertura só mostra de novo a janela do app que já está rodando. |
+| Outro programa usa a porta 8000. | O app escolhe outra porta automaticamente (8001, 8002...). O endereço aparece na barra do navegador. |
+| Quero fechar o app. | Use **Encerrar Promob Render Studio** no menu Iniciar. Fechar a aba do navegador não encerra o servidor. |
+| O download do modelo 4× ou do Realismo IA falhou. | Confira a conexão e clique em **Tentar novamente**. As partes já baixadas são aproveitadas. |
+| O Realismo IA aparece como indisponível. | O recurso precisa de GPU NVIDIA com driver 527.41 ou mais novo e 4 GB de VRAM ou mais (6 GB recomendados). Atualize o driver pelo site da NVIDIA e abra o app de novo. O modo Clássico continua funcionando. |
+| Atualizei o app e o Realismo IA pede ativação de novo. | A atualização substitui o Python privado. Ative de novo: as bibliotecas são baixadas outra vez, mas os modelos já baixados são reaproveitados. |
+
 ## Solução de problemas
 
 | Sintoma | O que verificar |
 | --- | --- |
 | A página mostra apenas a API ou a interface não aparece. | Rode `npm --prefix frontend ci` e `npm --prefix frontend run build` na raiz e reinicie. |
-| A porta 8000 está em uso. | Rode `uv run --project backend python run.py --port 8001` e abra a URL indicada no terminal. |
+| A porta 8000 está em uso (código-fonte). | Rode `uv run --project backend python run.py --port 8001` e abra a URL indicada no terminal. |
 | O Realismo IA informa que faltam modelos. | Execute `download_models.py --required` e depois `--verify-only` com os comandos do README. Use o mesmo ambiente e cache ao iniciar o app. |
 | Falta memória de vídeo ou o render demora demais. | Feche outros processos que usam a GPU ou selecione o modo clássico. Imagens maiores aumentam o custo de ampliação e a RAM necessárias. |
 | O download do modelo 4× falha. | Confira a conexão no primeiro uso e as mensagens do terminal. O peso ONNX é identificado na página de arquitetura. |

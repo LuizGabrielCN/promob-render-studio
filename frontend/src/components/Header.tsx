@@ -27,9 +27,8 @@ export const Header: React.FC = () => {
     return () => clearInterval(interval);
   }, [fetchHardware]);
 
-  const vramFreeGb = hardware
-    ? (hardware.vram_free_mb / 1024).toFixed(1)
-    : '4.8';
+  const offline = hardware?.status === 'offline';
+  const vramFreeGb = hardware?.cuda_available ? (hardware.vram_free_mb / 1024).toFixed(1) : null;
 
   return (
     <header className="h-14 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur px-4 flex items-center justify-between z-30 select-none">
@@ -44,7 +43,7 @@ export const Header: React.FC = () => {
               Promob Render Studio
             </span>
             <span className="text-[10px] font-mono uppercase bg-zinc-800/80 text-zinc-400 px-1.5 py-0.5 rounded border border-zinc-700/50">
-              4K ARCH
+              LOCAL
             </span>
           </div>
           <span className="text-[11px] text-zinc-400 hidden sm:inline">
@@ -92,13 +91,19 @@ export const Header: React.FC = () => {
           title="Telemetria de Hardware em Tempo Real"
         >
           <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            {!offline && (
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            )}
+            <span className={`relative inline-flex rounded-full h-2 w-2 ${offline ? 'bg-red-500' : 'bg-emerald-500'}`}></span>
           </span>
           <Cpu className="h-3.5 w-3.5 text-zinc-400" />
-          <span>{hardware?.gpu || 'NVIDIA RTX 2060'}</span>
-          <span className="text-zinc-400">|</span>
-          <span className="text-zinc-300">{vramFreeGb} GB VRAM</span>
+          <span>{hardware ? (hardware.cuda_available ? hardware.gpu : offline ? hardware.gpu : 'CPU') : 'Conectando...'}</span>
+          {vramFreeGb && (
+            <>
+              <span className="text-zinc-400">|</span>
+              <span className="text-zinc-300">{vramFreeGb} GB VRAM</span>
+            </>
+          )}
         </Badge>
 
         {original && (
