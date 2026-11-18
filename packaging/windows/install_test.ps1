@@ -31,8 +31,14 @@ $id = [Security.Principal.WindowsIdentity]::GetCurrent()
 $isAdmin = ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 Write-Host "Usuário: $($id.Name) | administrador: $isAdmin"
 Check (-not $isAdmin) "teste executado por conta comum (sem privilégios de administrador)"
-foreach ($tool in "python", "py", "git", "node", "npm", "uv") {
+foreach ($tool in "python", "git", "node", "npm", "uv") {
     Check (-not (Get-Command $tool -ErrorAction SilentlyContinue)) "ferramenta de desenvolvimento '$tool' fora do PATH"
+}
+$pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+if ($pyLauncher) {
+    # A imagem do GitHub Actions instala o py.exe em C:Windows. O app não o usa: o atalho
+    # chama o pythonw.exe privado por caminho absoluto. Fica registrado para o relatório.
+    Write-Host "AVISO: lançador py.exe presente em $($pyLauncher.Source) (imagem do runner; não usado pelo app)"
 }
 
 $app = Join-Path $env:LOCALAPPDATA "Programs\Promob Render Studio"
