@@ -148,3 +148,23 @@ def test_models_dir_env_is_preferred_download_target(monkeypatch, tmp_path):
     with open(fake, "wb") as fh:
         fh.truncate(super_res.MODEL_EXPECTED_SIZE)
     assert super_res.find_existing_model() == str(fake)
+
+
+def test_purge_partial_ai_imports_drops_namespace_leftovers(monkeypatch):
+    """Um 'import torch' durante a cópia deixa um namespace package quebrado; ele deve ser descartado."""
+    import sys
+    import types
+
+    broken = types.ModuleType("torch")
+    broken.__path__ = []  # namespace package: sem __file__
+    child = types.ModuleType("torch.cuda")
+    monkeypatch.setitem(sys.modules, "torch", broken)
+    monkeypatch.setitem(sys.modules, "torch.cuda", child)
+    healthy = types.ModuleType("einops")
+    healthy.__file__ = "einops/__init__.py"
+    monkeypatch.setitem(sys.modules, "einops", healthy)
+
+    removed = features.purge_partial_ai_imports()
+    assert "torch" in removed and "torch.cuda" in removed
+    assert "torch" not in sys.modules
+    assert sys.modules["einops"] is healthy

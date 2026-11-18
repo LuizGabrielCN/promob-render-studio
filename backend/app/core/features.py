@@ -108,6 +108,36 @@ def _ai_packages_installed() -> bool:
     return _check_diffusion_deps()
 
 
+AI_IMPORT_ROOTS = (
+    "torch", "torchvision", "diffusers", "transformers", "accelerate", "safetensors",
+    "einops", "rapidocr_onnxruntime", "skimage", "scipy",
+)
+
+
+def purge_partial_ai_imports() -> List[str]:
+    """
+    Remove de ``sys.modules`` bibliotecas de IA importadas pela metade.
+
+    Se algo tentar ``import torch`` enquanto o uv ainda copia os arquivos, o Python registra a
+    pasta incompleta como *namespace package* (sem ``__file__``) e o módulo quebrado fica em
+    cache até o processo terminar. Como essas bibliotecas não existiam antes da instalação,
+    descartar essas entradas é seguro e permite importá-las de verdade em seguida.
+    """
+    removed = []
+    for root in AI_IMPORT_ROOTS:
+        module = sys.modules.get(root)
+        if module is None or getattr(module, "__file__", None):
+            continue
+        for name in list(sys.modules):
+            if name == root or name.startswith(root + "."):
+                del sys.modules[name]
+                removed.append(name)
+    importlib.invalidate_caches()
+    if removed:
+        logger.info(f"Discarded partially imported AI modules: {sorted(set(n.split('.')[0] for n in removed))}")
+    return removed
+
+
 def _bundled_installer_paths() -> Optional[Tuple[str, str]]:
     uv = os.environ.get("PROMOB_UV")
     req = os.environ.get("PROMOB_AI_REQUIREMENTS")
@@ -305,6 +335,7 @@ class FeatureManager:
 
     def _torch_cuda_ok(self) -> bool:
         if self._torch_cuda_cache is None:
+            purge_partial_ai_imports()
             try:
                 import torch
 
@@ -537,6 +568,7 @@ class FeatureManager:
                 "Não foi possível baixar ou instalar as bibliotecas de IA. Verifique a conexão com a internet "
                 f"e tente novamente. Detalhes em {log_path}. {tail[-400:]}"
             )
+        purge_partial_ai_imports()
         # O cache só serve para retomar downloads interrompidos; após o sucesso, libera o espaço.
         shutil.rmtree(cache_dir, ignore_errors=True)
         self._update(task, progress=span[1], bytes_done=AI_PACKAGES_DOWNLOAD_BYTES)

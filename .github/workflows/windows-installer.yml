@@ -18,7 +18,7 @@ permissions:
 env:
   UV_VERSION: "0.11.19"
   PYTHON_VERSION: "3.11.15"
-  INNO_SETUP_VERSION: "6.4.3"
+  INNO_SETUP_VERSION: "6.7.1"
 
 jobs:
   build:
@@ -47,8 +47,9 @@ jobs:
         shell: pwsh
         run: |
           choco install innosetup --version $env:INNO_SETUP_VERSION -y --no-progress --allow-downgrade
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) { throw "ISCC.exe não encontrado" }
+          $iscc = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) { throw "ISCC.exe não encontrado" }
+          & $iscc /? | Select-Object -First 1
           "ISCC=$iscc" >> $env:GITHUB_ENV
       - name: Montar pacote e compilar instalador
         shell: pwsh
