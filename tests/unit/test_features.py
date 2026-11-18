@@ -155,16 +155,25 @@ def test_purge_partial_ai_imports_drops_namespace_leftovers(monkeypatch):
     import sys
     import types
 
-    broken = types.ModuleType("torch")
+    # Nomes fictícios: mexer em 'torch' real apagaria submódulos usados por outros testes.
+    monkeypatch.setattr(features, "AI_IMPORT_ROOTS", ("fakeai", "fakeok"))
+    broken = types.ModuleType("fakeai")
     broken.__path__ = []  # namespace package: sem __file__
-    child = types.ModuleType("torch.cuda")
-    monkeypatch.setitem(sys.modules, "torch", broken)
-    monkeypatch.setitem(sys.modules, "torch.cuda", child)
-    healthy = types.ModuleType("einops")
-    healthy.__file__ = "einops/__init__.py"
-    monkeypatch.setitem(sys.modules, "einops", healthy)
+    monkeypatch.setitem(sys.modules, "fakeai", broken)
+    monkeypatch.setitem(sys.modules, "fakeai.cuda", types.ModuleType("fakeai.cuda"))
+    healthy = types.ModuleType("fakeok")
+    healthy.__file__ = "fakeok/__init__.py"
+    monkeypatch.setitem(sys.modules, "fakeok", healthy)
 
     removed = features.purge_partial_ai_imports()
-    assert "torch" in removed and "torch.cuda" in removed
-    assert "torch" not in sys.modules
-    assert sys.modules["einops"] is healthy
+    assert sorted(removed) == ["fakeai", "fakeai.cuda"]
+    assert "fakeai" not in sys.modules
+    assert sys.modules["fakeok"] is healthy
+
+
+def test_purge_keeps_real_torch_loaded():
+    import sys
+
+    torch = pytest.importorskip("torch")
+    features.purge_partial_ai_imports()
+    assert sys.modules["torch"] is torch
