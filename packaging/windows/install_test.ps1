@@ -26,6 +26,14 @@ function Check($cond, $msg) {
     Write-Host "OK: $msg"
 }
 
+# Start-Process -Credential herda o ambiente de quem chamou (o administrador do runner).
+# Usa as pastas reais do perfil desta conta, como num logon normal.
+$env:USERPROFILE = [Environment]::GetFolderPath("UserProfile")
+$env:LOCALAPPDATA = [Environment]::GetFolderPath("LocalApplicationData")
+$env:APPDATA = [Environment]::GetFolderPath("ApplicationData")
+$env:TEMP = Join-Path $env:LOCALAPPDATA "Temp"; $env:TMP = $env:TEMP
+New-Item -ItemType Directory -Force $env:TEMP | Out-Null
+Write-Host "Perfil: $env:USERPROFILE | LOCALAPPDATA: $env:LOCALAPPDATA"
 $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
 $id = [Security.Principal.WindowsIdentity]::GetCurrent()
 $isAdmin = ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -48,7 +56,7 @@ $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
 # 1. Instalação ---------------------------------------------------------------
 $t = Get-Date
 $p = Start-Process $Setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=`"$OutDir\setup.log`"" -Wait -PassThru
-Check ($p.ExitCode -eq 0) "instalador terminou com código 0 em $([int]((Get-Date)-$t).TotalSeconds)s"
+Check ($p.ExitCode -eq 0) "instalador terminou com código $($p.ExitCode) (esperado 0) em $([int]((Get-Date)-$t).TotalSeconds)s"
 Check (Test-Path "$app\python\pythonw.exe") "Python privado instalado em $app"
 Check (Test-Path "$app\app\frontend\dist\index.html") "interface compilada incluída"
 Check (Test-Path "$startMenu\Promob Render Studio.lnk") "atalho no menu Iniciar"
