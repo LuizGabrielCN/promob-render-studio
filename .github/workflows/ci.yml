@@ -19,7 +19,14 @@ jobs:
         with:
           version: "0.11.19"
       - run: uv sync --project backend --python 3.11 --locked
+      - name: Baixar arquivos do tokenizador CLIP
+        run: >-
+          uv run --project backend --locked hf download emilianJR/epiCRealism
+          tokenizer/vocab.json tokenizer/merges.txt
+          tokenizer/tokenizer_config.json tokenizer/special_tokens_map.json
       - run: uv run --project backend --locked python -m pytest -c backend/pyproject.toml tests/unit tests/integration
+        env:
+          HF_HUB_OFFLINE: "1"
 
   frontend:
     name: Frontend

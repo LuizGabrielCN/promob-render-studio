@@ -241,15 +241,21 @@ def test_scene_prompts_auto_hygiene_and_negative_prompt():
         assert cg_word in neg_lower
 
 
-def test_prompts_fit_clip_token_window():
-    """CLIP silently truncates after 77 tokens: every prompt (and the negative) must fit."""
+@pytest.fixture(scope="module")
+def clip_tokenizer():
     tokenizer_mod = pytest.importorskip("transformers")
-    try:
-        tok = tokenizer_mod.CLIPTokenizer.from_pretrained(BASE_MODEL_ID, subfolder="tokenizer", local_files_only=True)
-    except Exception:
+    from huggingface_hub import try_to_load_from_cache
+
+    files = ("tokenizer/vocab.json", "tokenizer/merges.txt")
+    if not all(isinstance(try_to_load_from_cache(BASE_MODEL_ID, name), str) for name in files):
         pytest.skip("SD 1.5 tokenizer not cached locally")
+    return tokenizer_mod.CLIPTokenizer.from_pretrained(BASE_MODEL_ID, subfolder="tokenizer", local_files_only=True)
+
+
+def test_prompts_fit_clip_token_window(clip_tokenizer):
+    """CLIP silently truncates after 77 tokens: every prompt (and the negative) must fit."""
     for text in list(SCENE_PROMPTS.values()) + [NEGATIVE_PROMPT]:
-        assert len(tok(text).input_ids) <= 77, text
+        assert len(clip_tokenizer(text).input_ids) <= 77, text
 
 
 def test_harmonize_chromatic_lab_anchors_low_frequency_luminance_and_keeps_highlights():
@@ -1240,15 +1246,10 @@ def test_generate_iclight_clears_tensors_and_releases_vram_on_exception(monkeypa
     assert calls == ["release_vram"]
 
 
-def test_m2_prompts_with_dynamic_emitters_fit_clip_77_tokens():
-    tokenizer_mod = pytest.importorskip("transformers")
-    try:
-        tok = tokenizer_mod.CLIPTokenizer.from_pretrained(BASE_MODEL_ID, subfolder="tokenizer", local_files_only=True)
-    except Exception:
-        pytest.skip("SD 1.5 tokenizer not cached locally")
+def test_m2_prompts_with_dynamic_emitters_fit_clip_77_tokens(clip_tokenizer):
     for text in SCENE_PROMPTS.values():
         full = f"{text}, warm glowing fireplace light, soft window daylight, warm concealed linear glow"
-        assert len(tok(full).input_ids) <= 77, full
+        assert len(clip_tokenizer(full).input_ids) <= 77, full
 
 
 # ---------------------------------------------------------------------------------------------------------

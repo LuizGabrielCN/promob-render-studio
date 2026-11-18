@@ -24,6 +24,8 @@ npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
+Os testes de comprimento dos prompts usam os arquivos do tokenizador CLIP no cache local. O GitHub Actions baixa apenas esses arquivos para rodar as verificações sem os pesos de difusão.
+
 A suíte de ponta a ponta fica em `tests/e2e`. Execute-a com `uv run --project backend --locked python -m pytest -c backend/pyproject.toml tests/e2e`. Os casos com GPU exigem CUDA e os modelos no cache local. Os de navegador usam Chrome ou Edge. Alguns cenários visuais dependem de imagens fornecidas localmente por `PROMOB_REFERENCE_PATH`, `CHATGPT_REF_BEFORE_PATH`, `CHATGPT_REF_AFTER_PATH` ou `AMOSTRAS_PROMOB_DIR`. Alguns testes esperam regiões de interesse específicas, definidas no arquivo `tests/e2e/conftest.py`. Esses cenários podem ser ignorados automaticamente quando as referências faltam.
 
 Ao abrir um pull request, descreva o comportamento alterado e a validação que executou. Mantenha pesos, imagens de clientes e resultados de benchmark fora do histórico Git.
